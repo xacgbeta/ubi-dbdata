@@ -28,7 +28,7 @@ This project provides a Rust implementation of a DLL (`dbdata.dll`) that emulate
 
 ## Builds
 
-Builds are available in the [releases](https://github.com/denuvosanctuary/ubi-dbdata/releases) section of the repository. Nighly builds are also available in the [actions](https://github.com/denuvosanctuary/ubi-dbdata/actions) section.
+Builds are available in the [releases](https://github.com/denuvosanctuary/ubi-dbdata/releases) section of the repository. Nightly builds are also available in the [actions](https://github.com/denuvosanctuary/ubi-dbdata/actions) section.
 
 ## Disclaimer
 
