@@ -2,6 +2,8 @@
 
 This project provides a Rust implementation of a DLL (`dbdata.dll`) that emulates the Ubisoft Denuvo token interface. It is intended for research, reverse engineering, and interoperability purposes.
 
+> Note for Denuvo games: each Steam account can achieve at most 5 activations a day. An EncryptedAppTicket expires after 20 minutes and can be used multiple times in that time span, using the same ticket won't bypass the 5 daily activations limit.
+
 ## Usage
 
 1. **Build the DLL:**
