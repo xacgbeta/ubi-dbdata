@@ -2,6 +2,19 @@
 
 This project provides a Rust implementation of a DLL (`dbdata.dll`) that emulates the Ubisoft Denuvo token interface. It is intended for research, reverse engineering, and interoperability purposes.
 
+## SecureDLC
+
+SecureDLC was introduced by Ubisoft in the September 11th 2025 patch of Assassin's Creed Shadows. It requires a new type of token called `ownershipList` that is obtained through Ubisoft APIs with the normal denuvo token and a list of dlcs that the original request token was generated with. The DLL will also try to read the `ownership` field from the `token.ini` file if present.
+
+A listof dlcs is also needed to make this ownershipList token work. The list can be specified in the `dbdata.ini` in this format:
+
+```ini
+[dlcs]
+dlcs=DLC1,DLC2,DLC3
+```
+
+If this file is not present, the DLL will try to read the dlcs from the `upc_r2.ini` file.
+
 ## Usage
 
 1. **Build the DLL:**
@@ -19,8 +32,15 @@ This project provides a Rust implementation of a DLL (`dbdata.dll`) that emulate
 3. **Token Handling:**
 
    - On first run, a `token_req.txt` file will be generated with the token request and appid of the game.
-   - Place your token in a file named `token.txt` in the same directory.
+   - Place your token in a file named `token.ini` in the same directory.
    - The DLL will read the token from this file allowing denuvo to work properly.
+
+### Format of `token.ini`:
+```ini
+[token]
+token=<your_token_here>
+ownership=<optional_ownership_list_token_here>
+```
 
 ## Debug logs
 

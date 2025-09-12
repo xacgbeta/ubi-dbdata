@@ -1,11 +1,15 @@
 mod logging;
+mod token;
 
-use std::{error::Error, ffi::{c_void, CString, OsString}, os::windows::ffi::OsStringExt, path::{Path, PathBuf}, sync::OnceLock};
+use std::{ffi::{c_void, CString, OsString}, os::windows::ffi::OsStringExt, path::{Path, PathBuf}, sync::OnceLock};
 
 use winapi::{shared::minwindef::{DWORD, HINSTANCE, LPVOID}, um::{libloaderapi::GetModuleFileNameW, winnt::DLL_PROCESS_ATTACH, winuser::MessageBoxA}};
 
+use crate::token::Settings;
+
 static DLL_PATH: OnceLock<PathBuf> = OnceLock::new();
 static APP_ID: OnceLock<u32> = OnceLock::new();
+static SETTINGS: OnceLock<Option<Settings>> = OnceLock::new();
 
 #[unsafe(no_mangle)]
 extern "system" fn DllMain(module: HINSTANCE, reason: DWORD, _reserved: LPVOID) -> bool {    
@@ -18,7 +22,15 @@ extern "system" fn DllMain(module: HINSTANCE, reason: DWORD, _reserved: LPVOID) 
                 let path = Path::new(&path);
                 path.parent().unwrap().to_path_buf()
             };
-            DLL_PATH.set(dll_path).ok();
+            DLL_PATH.set(dll_path.clone()).ok();
+
+            let settings = Settings::new(&dll_path)
+                .map_err(|e| {
+                    log::error!("Could not read settings: {}", e);
+                })
+                .ok();
+
+            SETTINGS.set(settings).ok();
 
             logging::init_logger();
             logging::setup_panic_handler();
@@ -43,18 +55,21 @@ pub struct IGameTokenInterfaceVtable {
     get_buffer: *const c_void,
     new_thread_get_burn_ticket_res: *const c_void,
     get_thread: *const c_void,
+    get_ownership_buffer: *const c_void,
+    get_dlcs: *const c_void,
+    set_arg_to_0: *const c_void,
 }
 
 #[unsafe(export_name = "?getGameTokenInterface@@YAPEAVIGameTokenInterface@@PEAX_K@Z")]
 pub extern "C" fn get_game_token_interface(
     app_id: *const i64,
-    always_8: i64,
+    version: i64,
 ) -> *const IGameTokenInterface {
     let app_id = unsafe { *app_id };
 
     APP_ID.set(app_id as u32).ok();
 
-    log::info!("getGameTokenInterface called {:?} {:?}", app_id, always_8);
+    log::info!("getGameTokenInterface called {:?} {:?}", app_id, version);
 
     let vtable = Box::new(IGameTokenInterfaceVtable {
         is_token_loaded: is_token_loaded as *const c_void,
@@ -64,6 +79,9 @@ pub extern "C" fn get_game_token_interface(
         get_buffer: get_buffer as *const c_void,
         new_thread_get_burn_ticket_res: new_thread_get_burn_ticket_res as *const c_void,
         get_thread: get_thread as *const c_void,
+        get_ownership_buffer: get_ownership_buffer as *const c_void,
+        get_dlcs: get_dlcs as *const c_void,
+        set_arg_to_0: set_arg_to_0 as *const c_void,
     });
 
     let example = Box::new(IGameTokenInterface {
@@ -76,7 +94,7 @@ pub extern "C" fn get_game_token_interface(
 fn is_token_loaded(
     this: *const IGameTokenInterface
 ) -> u32 {
-    log::info!("get_internal_8 called {:?}", this);
+    log::info!("is_token_loaded called {:?}", this);
 
     1
 }
@@ -90,11 +108,11 @@ fn return_0() -> i64 {
 fn get_cached_or_fresh_token(
     this: *mut IGameTokenInterface,
     token_buffer_ptr: *const c_void,
-    not_used: i32
+    length: i32
 ) -> bool {
-    log::info!("get_cached_or_fresh_token called {:?} {:?} {:?}", this, token_buffer_ptr, not_used);
+    log::info!("get_cached_or_fresh_token called {:?} {:?} {:?}", this, token_buffer_ptr, length);
 
-    if !token_exists() {
+    if !SETTINGS.get().unwrap().is_some() {
         unsafe {
             let request_token = std::ffi::CStr::from_ptr(token_buffer_ptr as *const i8).to_str().unwrap();
             let request_token = format!("{}|{}", request_token, APP_ID.get().unwrap());
@@ -120,19 +138,20 @@ fn invalidate_cached_token(
 
 fn get_buffer(
     this: *const IGameTokenInterface,
-    lenght: *mut u64
+    length: *mut u64
 ) -> *const c_void {
-    log::info!("get_buffer called {:?} {:?}", this, lenght);
+    log::info!("get_buffer called {:?} {:?}", this, length);
 
-    let token = get_token()
-        .map_err(|e| {
-            message_box("Error", &format!("Error getting token: {}", e));
-        })
-        .unwrap();
+    let token = SETTINGS.get().unwrap().as_ref()
+        .map(|s| s.token.token.clone())
+        .unwrap_or_else(|| {
+            message_box("Error", "Token not found");
+            "".to_string()
+        });
 
-    if !lenght.is_null() {
+    if !length.is_null() {
         unsafe {
-            *lenght = token.len() as u64;
+            *length = token.len() as u64;
         }
     }
 
@@ -157,6 +176,57 @@ fn get_thread(
     std::ptr::null()
 }
 
+fn get_ownership_buffer(
+    this: *const IGameTokenInterface,
+    length: *mut u64
+) -> *const c_void {
+    log::info!("get_buffer_new called {:?} {:?}", this, length);
+
+    let token = SETTINGS.get().unwrap().as_ref()
+        .and_then(|t| t.token.ownership.clone())
+        .unwrap_or_else(|| "".to_string());
+
+    if !length.is_null() {
+        unsafe {
+            *length = token.len() as u64;
+        }
+    }
+
+    Box::into_raw(token.to_string().into_boxed_str()) as *const c_void
+}
+
+fn get_dlcs(
+    this: *const IGameTokenInterface,
+    arg: *mut i64
+) -> *const i32 {
+    log::info!("new_func_2 called {:?} {:?}", this, arg);
+
+    let dlcs = SETTINGS.get().unwrap().as_ref()
+        .map(|s| s.dlcs.clone())
+        .unwrap_or_else(|| vec![]);
+
+    if !arg.is_null() {
+        unsafe {
+            *arg = dlcs.len() as i64;
+        }
+    }
+
+    Box::into_raw(dlcs.into_boxed_slice()) as *const i32
+}
+
+fn set_arg_to_0(
+    this: *const IGameTokenInterface,
+    arg: *mut u64
+) {
+    log::info!("set_arg_to_0 called {:?} {:?}", this, arg);
+    
+    if !arg.is_null() {
+        unsafe {
+            *arg = 0;
+        }
+    }
+}
+
 pub fn message_box(
     title: &str,
     message: &str
@@ -172,20 +242,4 @@ pub fn message_box(
             0,
         );
     }
-}
-
-fn get_token() -> Result<String, Box<dyn Error>> {
-    let path = DLL_PATH.get().ok_or("DLL_PATH not set")?
-        .join("token.txt");
-    let token = std::fs::read_to_string(path)?
-        .trim()
-        .to_string();
-    
-    Ok(token)
-}
-
-fn token_exists() -> bool {
-    DLL_PATH.get().unwrap_or(&PathBuf::from(""))
-        .join("token.txt")
-        .exists()
 }
