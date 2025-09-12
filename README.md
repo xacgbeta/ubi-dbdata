@@ -9,7 +9,7 @@ SecureDLC was introduced by Ubisoft in the September 11th 2025 patch of Assassin
 A listof dlcs is also needed to make this ownershipList token work. The list can be specified in the `dbdata.ini` in this format:
 
 ```ini
-[dlcs]
+[settings]
 dlcs=DLC1,DLC2,DLC3
 ```
 
